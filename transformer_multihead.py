@@ -37,13 +37,14 @@ class multihead_attention(nn.Module):
 input_dim = 1024
 d_model = 512
 num_heads = 8
-
 batch_size = 30
 sequence_length = 5
-x = torch.randn((batch_size, sequence_length, input_dim))
+print(f'multihead attention.\ninput_dim={input_dim}, d_model={d_model}, num_heads={num_heads}, batch_size={batch_size}, sequence_length={sequence_length}')
 
+x = torch.randn((batch_size, sequence_length, input_dim))
+print(f'x={x}')
 model = multihead_attention(input_dim, d_model, num_heads)
 out = model.forward(x)
-print(out)
+print(f'out={out}')
 
 
