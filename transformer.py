@@ -183,23 +183,23 @@ class Encoder(nn.Module):
 class MultiHeadCrossAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super().__init__()
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-        self.kv_layer = nn.Linear(d_model , 2 * d_model)
-        self.q_layer = nn.Linear(d_model , d_model)
-        self.linear_layer = nn.Linear(d_model, d_model)
+        self.d_model = d_model                              # 차원수
+        self.num_heads = num_heads                          # 멀티헤더 수. 논문에선 8 사용
+        self.head_dim = d_model // num_heads                # 헤더 당 차원수. 512/8=64가 됨.
+        self.kv_layer = nn.Linear(d_model , 2 * d_model)    # 가중치 학습용 KV텐서 신경망 준비. (512, 2*512)
+        self.q_layer = nn.Linear(d_model , d_model)         # 가중치 학습용 Q신경망 준비. (512,512) 
+        self.linear_layer = nn.Linear(d_model, d_model)     # 선형 레이어 준비. (512,512)
     
-    def forward(self, x, y, mask):
-        batch_size, sequence_length, d_model = x.size() # in practice, this is the same for both languages...so we can technically combine with normal attention
-        kv = self.kv_layer(x)
-        q = self.q_layer(y)
+    def forward(self, x, y, mask):           # x는 인코더의 KV 벡터값, y는 Q벡터값 입력임
+        batch_size, sequence_length, d_model = x.size() # 배치크기, 시퀀스크기=200, 512
+        kv = self.kv_layer(x)                           # 입력값(예. 영어) X에서 KV 레이어 계산
+        q = self.q_layer(y)                             # 목표값(예. 독일어) Y에서 Q레이어 계산
         kv = kv.reshape(batch_size, sequence_length, self.num_heads, 2 * self.head_dim)
         q = q.reshape(batch_size, sequence_length, self.num_heads, self.head_dim)
         kv = kv.permute(0, 2, 1, 3)
         q = q.permute(0, 2, 1, 3)
-        k, v = kv.chunk(2, dim=-1)
-        values, attention = scaled_dot_product(q, k, v, mask) # We don't need the mask for cross attention, removing in outer function!
+        k, v = kv.chunk(2, dim=-1)                      # 계산을 위해 KV텐서를 K와 V로 나눔
+        values, attention = scaled_dot_product(q, k, v, mask) # KQ 유사도 계산. V와 어텐션 스코어 계산됨
         values = values.permute(0, 2, 1, 3).reshape(batch_size, sequence_length, d_model)
         out = self.linear_layer(values)
         return out
@@ -208,14 +208,17 @@ class MultiHeadCrossAttention(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, ffn_hidden, num_heads, drop_prob):
         super(DecoderLayer, self).__init__()
+        # 멀티헤드, 레이어 정규화, 드롭아웃 정의
         self.self_attention = MultiHeadAttention(d_model=d_model, num_heads=num_heads)
         self.layer_norm1 = LayerNormalization(parameters_shape=[d_model])
         self.dropout1 = nn.Dropout(p=drop_prob)
 
+        # 인코더 KV와 디코더 Q입력받아 멀티헤드 클로스 어텐션하는 모듈 정의
         self.encoder_decoder_attention = MultiHeadCrossAttention(d_model=d_model, num_heads=num_heads)
         self.layer_norm2 = LayerNormalization(parameters_shape=[d_model])
         self.dropout2 = nn.Dropout(p=drop_prob)
 
+        # 논문의 FF 레이어 정의
         self.ffn = PositionwiseFeedForward(d_model=d_model, hidden=ffn_hidden, drop_prob=drop_prob)
         self.layer_norm3 = LayerNormalization(parameters_shape=[d_model])
         self.dropout3 = nn.Dropout(p=drop_prob)
@@ -227,7 +230,7 @@ class DecoderLayer(nn.Module):
         y = self.layer_norm1(y + _y)
 
         _y = y.clone()
-        y = self.encoder_decoder_attention(x, y, mask=cross_attention_mask)
+        y = self.encoder_decoder_attention(x, y, mask=cross_attention_mask)  # 인코더 KV 벡터 입력, 디코더 Q 벡터 입력. 마스크 처리. 
         y = self.dropout2(y)
         y = self.layer_norm2(y + _y)
 
@@ -283,6 +286,7 @@ class Transformer(nn.Module):
                 PADDING_TOKEN
                 ):
         super().__init__()
+        # 인코더는 소스 언어(영어), 디코더는 목표언어(독일어)를 학습하고, 인코더에서 계산된 값이 KV벡터로 디코더에 입력됨. 디코더 어텐션 출력은 앞의 KV값과 함께 어텐션 계산되어, 어텐션 스코어가 출력됨. 이 과정을 반복학습함.
         self.encoder = Encoder(d_model, ffn_hidden, num_heads, drop_prob, num_layers, max_sequence_length, english_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN)
         self.decoder = Decoder(d_model, ffn_hidden, num_heads, drop_prob, num_layers, max_sequence_length, kannada_to_index, START_TOKEN, END_TOKEN, PADDING_TOKEN)
         self.linear = nn.Linear(d_model, kn_vocab_size)
